@@ -303,12 +303,12 @@ async function handleAddCityFlow(ctx, state, text) {
   }
 }
 
-export async function sendAlertMessage(telegramUserId, message) {
+export async function sendAlertMessage(telegramUserId, message, options = {}) {
   if (!bot) {
     throw new Error('Bot not initialized');
   }
   
-  await bot.telegram.sendMessage(telegramUserId, message);
+  await bot.telegram.sendMessage(telegramUserId, message, options);
 }
 
 export function getBot() {

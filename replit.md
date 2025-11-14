@@ -32,6 +32,12 @@ A Node.js application that monitors Telegram channels for threat alerts using MT
   - Message deduplication cache (skips re-analyzing duplicates within 60s)
   - Reduced context from 10 to 5 messages (faster AI responses)
   - Channel-specific dedup keys prevent cross-channel false positives
+- **Beautiful alert formatting**
+  - HTML-formatted messages with bold/italic styling
+  - Dynamic emojis based on threat type (🚨 strategic, 🚀 missiles, 🛩️ drones, etc.)
+  - Color-coded probability indicators (🔴 High, 🟡 Medium, 🟢 Low)
+  - Visual dividers and structured sections for easy reading
+  - HTML escaping for security and reliability
 
 ## Architecture
 
