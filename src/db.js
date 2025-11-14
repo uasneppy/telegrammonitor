@@ -66,11 +66,19 @@ function createTables() {
       is_strategic INTEGER DEFAULT 0
     );
     
+    CREATE TABLE IF NOT EXISTS user_ignored_words (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      word TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    
     CREATE INDEX IF NOT EXISTS idx_user_locations_user_id ON user_locations(user_id);
     CREATE INDEX IF NOT EXISTS idx_user_threat_filters_user_id ON user_threat_filters(user_id);
     CREATE INDEX IF NOT EXISTS idx_channel_messages_channel_id ON channel_messages(channel_id);
     CREATE INDEX IF NOT EXISTS idx_sent_alerts_user_id ON sent_alerts(user_id);
     CREATE INDEX IF NOT EXISTS idx_sent_alerts_sent_at ON sent_alerts(sent_at);
+    CREATE INDEX IF NOT EXISTS idx_user_ignored_words_user_id ON user_ignored_words(user_id);
   `);
 }
 
@@ -192,6 +200,30 @@ export function getUserAlerts(userId, minutesAgo) {
     WHERE user_id = ? AND sent_at >= ?
     ORDER BY sent_at DESC
   `).all(userId, timestamp);
+}
+
+export function getUserIgnoredWords(userId) {
+  return db.prepare('SELECT * FROM user_ignored_words WHERE user_id = ? ORDER BY word').all(userId);
+}
+
+export function addIgnoredWord(userId, word) {
+  const normalized = word.toLowerCase().trim();
+  
+  if (!normalized) {
+    return null;
+  }
+  
+  const existing = db.prepare('SELECT id FROM user_ignored_words WHERE user_id = ? AND LOWER(word) = ?').get(userId, normalized);
+  
+  if (existing) {
+    return null;
+  }
+  
+  return db.prepare('INSERT INTO user_ignored_words (user_id, word) VALUES (?, ?)').run(userId, normalized);
+}
+
+export function deleteIgnoredWord(userId, wordId) {
+  return db.prepare('DELETE FROM user_ignored_words WHERE id = ? AND user_id = ?').run(wordId, userId);
 }
 
 export function getDatabase() {

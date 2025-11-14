@@ -1,4 +1,4 @@
-import { getAllUsers, getUserLocations, getUserThreatFilters, saveSentAlert } from './db.js';
+import { getAllUsers, getUserLocations, getUserThreatFilters, saveSentAlert, getUserIgnoredWords } from './db.js';
 import { isStrategicThreat } from './analyzer.js';
 
 export async function dispatchThreatAlert(analysis, botApiSendFunction) {
@@ -13,7 +13,13 @@ export async function dispatchThreatAlert(analysis, botApiSendFunction) {
   console.log(`📢 Dispatching threat alert (strategic: ${isStrategic})`);
   
   const alertPromises = users
-    .filter(user => isStrategic || shouldNotifyUser(user, analysis))
+    .filter(user => {
+      if (hasIgnoredWords(user, analysis)) {
+        console.log(`⊘ Skipping user ${user.telegram_user_id} due to ignored word match`);
+        return false;
+      }
+      return isStrategic || shouldNotifyUser(user, analysis);
+    })
     .map(user => 
       sendAlertToUser(user.telegram_user_id, analysis, botApiSendFunction, isStrategic, user.id)
         .then(() => {
@@ -27,6 +33,21 @@ export async function dispatchThreatAlert(analysis, botApiSendFunction) {
     );
   
   await Promise.allSettled(alertPromises);
+}
+
+function hasIgnoredWords(user, analysis) {
+  const ignoredWords = getUserIgnoredWords(user.id);
+  
+  if (ignoredWords.length === 0) {
+    return false;
+  }
+  
+  const description = (analysis.description || '').toLowerCase();
+  
+  return ignoredWords.some(wordObj => {
+    const word = wordObj.word.toLowerCase();
+    return description.includes(word);
+  });
 }
 
 function shouldNotifyUser(user, analysis) {

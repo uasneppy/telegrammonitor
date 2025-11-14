@@ -8,6 +8,9 @@ import {
   getUserThreatFilters,
   toggleUserThreatFilter,
   getUserAlerts,
+  getUserIgnoredWords,
+  addIgnoredWord,
+  deleteIgnoredWord,
 } from './db.js';
 
 let bot = null;
@@ -43,7 +46,8 @@ export function initBotApi() {
 function getMainMenuKeyboard() {
   return Markup.keyboard([
     ['🏙️ Мої міста', '⚠️ Типи загроз'],
-    ['📊 Зведення', 'ℹ️ Допомога']
+    ['🚫 Ігноровані слова', '📊 Зведення'],
+    ['ℹ️ Допомога']
   ]).resize();
 }
 
@@ -167,6 +171,10 @@ async function showHelpScreen(ctx) {
     '• Обери які типи загроз тебе цікавлять\n' +
     '• Стратегічні загрози (ракети, авіація) надсилаються всім\n' +
     '• Локальні загрози фільтруються за твоїми містами\n\n' +
+    '🚫 Ігноровані слова:\n' +
+    '• Додай слова, які хочеш ігнорувати\n' +
+    '• Сповіщення з цими словами в описі не надсилатимуться\n' +
+    '• Працює для всіх типів загроз\n\n' +
     '📊 Зведення:\n' +
     '• Отримай короткий звіт про загрози за період\n' +
     '• Доступні періоди від 10 хвилин до 10 годин\n\n' +
@@ -194,6 +202,43 @@ async function handleThreatToggleText(ctx, text) {
     toggleUserThreatFilter(user.id, threat);
     await showThreatsScreen(ctx);
   }
+}
+
+async function showIgnoredWordsScreen(ctx) {
+  const telegramUserId = ctx.from.id;
+  const user = getOrCreateUser(telegramUserId);
+  const ignoredWords = getUserIgnoredWords(user.id);
+  
+  if (ignoredWords.length === 0) {
+    await ctx.reply(
+      '🚫 Ігноровані слова\n\n' +
+      'У тебе поки немає ігнорованих слів.\n\n' +
+      '💡 Якщо додаси слово, сповіщення з цим словом в описі не надсилатимуться.',
+      Markup.keyboard([
+        ['➕ Додати слово'],
+        ['« Назад']
+      ]).resize()
+    );
+    return;
+  }
+  
+  let message = '🚫 Ігноровані слова\n\n';
+  
+  const buttons = [['➕ Додати слово']];
+  ignoredWords.forEach((word, index) => {
+    message += `${index + 1}. ${word.word}\n`;
+  });
+  
+  message += '\n💡 Щоб видалити слово, напиши його номер';
+  
+  buttons.push(['« Назад']);
+  
+  await ctx.reply(message, Markup.keyboard(buttons).resize());
+  
+  userStates.set(telegramUserId, {
+    command: 'deleteignoredword',
+    ignoredWords: ignoredWords
+  });
 }
 
 async function showSummaryScreen(ctx) {
@@ -351,6 +396,15 @@ async function handleText(ctx) {
     return;
   }
   
+  if (state && state.command === 'addignoredword') {
+    if (text === '❌ Скасувати') {
+      await handleCancelAction(ctx);
+      return;
+    }
+    await handleAddIgnoredWordFlow(ctx, state, text);
+    return;
+  }
+  
   if (state && state.command === 'summary') {
     if (text === '« Назад') {
       userStates.delete(telegramUserId);
@@ -383,6 +437,28 @@ async function handleText(ctx) {
     }
   }
   
+  if (state && state.command === 'deleteignoredword') {
+    if (text === '« Назад') {
+      userStates.delete(telegramUserId);
+      await showMainMenu(ctx);
+      return;
+    }
+    
+    const num = parseInt(text);
+    if (!isNaN(num) && num > 0 && num <= state.ignoredWords.length) {
+      const word = state.ignoredWords[num - 1];
+      const user = getOrCreateUser(telegramUserId);
+      deleteIgnoredWord(user.id, word.id);
+      await ctx.reply('✅ Слово видалено');
+      userStates.delete(telegramUserId);
+      await showIgnoredWordsScreen(ctx);
+      return;
+    } else if (text !== '➕ Додати слово') {
+      await ctx.reply('❌ Будь ласка, введи номер слова або обери дію з меню');
+      return;
+    }
+  }
+  
   switch (text) {
     case '🏙️ Мої міста':
       userStates.delete(telegramUserId);
@@ -391,6 +467,10 @@ async function handleText(ctx) {
     case '⚠️ Типи загроз':
       userStates.delete(telegramUserId);
       await showThreatsScreen(ctx);
+      break;
+    case '🚫 Ігноровані слова':
+      userStates.delete(telegramUserId);
+      await showIgnoredWordsScreen(ctx);
       break;
     case '📊 Зведення':
       userStates.delete(telegramUserId);
@@ -407,6 +487,9 @@ async function handleText(ctx) {
       break;
     case '➕ Додати місто':
       await handleAddCityAction(ctx);
+      break;
+    case '➕ Додати слово':
+      await handleAddIgnoredWordAction(ctx);
       break;
     case '❌ Скасувати':
       await handleCancelAction(ctx);
@@ -466,6 +549,52 @@ async function handleAddCityFlow(ctx, state, text) {
     
     userStates.delete(telegramUserId);
   }
+}
+
+async function handleAddIgnoredWordAction(ctx) {
+  const telegramUserId = ctx.from.id;
+  const user = getOrCreateUser(telegramUserId);
+  
+  userStates.set(telegramUserId, {
+    command: 'addignoredword',
+    userId: user.id,
+  });
+  
+  await ctx.reply(
+    '➕ Додавання ігнорованого слова\n\n' +
+    'Введи слово, яке хочеш ігнорувати:\n' +
+    '(наприклад: тривога, увага)\n\n' +
+    '💡 Сповіщення з цим словом в описі не надсилатимуться.',
+    Markup.keyboard([
+      ['❌ Скасувати']
+    ]).resize()
+  );
+}
+
+async function handleAddIgnoredWordFlow(ctx, state, text) {
+  const telegramUserId = ctx.from.id;
+  
+  const result = addIgnoredWord(state.userId, text);
+  
+  if (!result) {
+    await ctx.reply(
+      '❌ Це слово вже в списку або некоректне.\n\n' +
+      'Спробуй інше слово або скасуй дію.',
+      Markup.keyboard([
+        ['❌ Скасувати']
+      ]).resize()
+    );
+    return;
+  }
+  
+  await ctx.reply(
+    `✅ Слово додано!\n\n` +
+    `🚫 "${text.toLowerCase().trim()}"\n\n` +
+    `Сповіщення з цим словом в описі більше не надсилатимуться.`,
+    getMainMenuKeyboard()
+  );
+  
+  userStates.delete(telegramUserId);
 }
 
 export async function sendAlertMessage(telegramUserId, message, options = {}) {

@@ -17,7 +17,7 @@ A Node.js application that monitors Telegram channels for threat alerts using MT
   - Emoji-decorated navigation with back buttons
   - Robust state management with cancel/back handling
 - Integrated Google Gemini 2.5 Flash for threat analysis
-- Built SQLite database with 6 tables for user management and alert history
+- Built SQLite database with 7 tables for user management and alert history
 - Implemented smart threat dispatcher with location/type filtering
 - Added comprehensive README with setup instructions
 - **Enhanced AI-based strategic threat detection**
@@ -43,15 +43,21 @@ A Node.js application that monitors Telegram channels for threat alerts using MT
   - Fallback to manual summary when AI unavailable
   - Stores all sent alerts in database for historical analysis
   - Provides threat count, types, and affected regions
+- **Per-user ignored words filtering**
+  - Users can add words to ignore in alert descriptions
+  - Case-insensitive matching in threat descriptions
+  - Alerts containing ignored words are not sent to that user
+  - Works for all threat types (strategic and local)
+  - Simple UI for managing ignored words list
 
 ## Architecture
 
 ### Core Modules
 1. **src/config.js** - Environment variable loading and validation
-2. **src/db.js** - SQLite database with users, locations, filters, channels, messages, sent_alerts
+2. **src/db.js** - SQLite database with users, locations, filters, channels, messages, sent_alerts, user_ignored_words
 3. **src/geminiClient.js** - Gemini AI integration for threat analysis with strategic detection
 4. **src/analyzer.js** - Parse 7-line Ukrainian threat summaries from Gemini with AI-based strategic classification
-5. **src/dispatcher.js** - Match threats to users based on location/type filters, save alert history
+5. **src/dispatcher.js** - Match threats to users based on location/type/ignored words filters, save alert history
 6. **src/botApi.js** - Telegraf bot with reply keyboards and commands (/start, /menu, /summary)
 7. **src/mtprotoClient.js** - MTProto user-bot for channel monitoring with session persistence
 8. **src/index.js** - Main entry point that orchestrates all components
@@ -92,6 +98,7 @@ A Node.js application that monitors Telegram channels for threat alerts using MT
 - **users** - Bot API user registrations
 - **user_locations** - Cities/oblasts per user (label, city, oblast)
 - **user_threat_filters** - Threat type preferences per user
+- **user_ignored_words** - Words to filter out of alerts per user (case-insensitive)
 - **channels** - Monitored Telegram channels
 - **channel_messages** - Last 20 messages per channel for context
 - **sent_alerts** - Historical record of all alerts sent to users (for summaries)
@@ -105,6 +112,10 @@ A Node.js application that monitors Telegram channels for threat alerts using MT
   - Fallback: 30+ keyword patterns (TU-95, shaheds, cruise missiles, Kalibr, etc.)
   - Handles Cyrillic/Latin variants, plurals, and spelling variations
 - **Smart filtering** - Strategic threats sent to all users; local threats filtered by location
+- **Per-user ignored words** - Users can filter alerts containing specific words
+  - Case-insensitive matching in threat descriptions
+  - Applies to all threat types (strategic and local)
+  - Simple add/delete interface via reply keyboards
 - **Performance optimized** - Parallel alert dispatch, deduplication cache, reduced AI latency, optimized database queries
 - **Reply keyboard interface** - Persistent buttons for easy navigation, robust state management
 - **Summary reports** - AI-generated threat summaries for customizable time periods (10 min to 10 hours)
@@ -144,6 +155,7 @@ telegram-threat-monitor/
 5. Use the reply keyboard buttons to navigate:
    - 🏙️ Мої міста - Add/manage your cities
    - ⚠️ Типи загроз - Toggle threat type filters
+   - 🚫 Ігноровані слова - Add words to filter from alerts
    - 📊 Зведення - Get threat summaries
    - ℹ️ Допомога - View help information
 6. Use `/summary` command or button to view threat reports for different time periods
