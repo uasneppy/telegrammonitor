@@ -73,15 +73,21 @@ npm start
 
 ### For Users (via Telegram Bot)
 
-Start a chat with your bot and use these commands:
+Start a chat with your bot and use the beautiful inline keyboard interface:
 
-- `/start` - Register with the bot
-- `/help` - Show available commands
-- `/cities` - View your configured cities
-- `/addcity` - Add a new city/location
-- `/delcity` - Remove a city/location
-- `/threats` - View threat type filters
-- `/togglethreat` - Toggle specific threat types
+1. Send `/start` or `/menu` to open the main menu
+2. Use the interactive buttons to:
+   - 🏙️ **Мої міста** - View, add, or delete your cities
+   - ⚠️ **Типи загроз** - Toggle threat type filters with one tap
+   - ℹ️ **Допомога** - View detailed help information
+
+The bot features a modern, aesthetic interface with:
+- Interactive inline keyboard buttons
+- Visual status indicators (✅/⬜️ for filters)
+- Step-by-step city addition flow
+- One-tap city deletion
+- Instant threat filter toggling
+- Easy navigation with back buttons
 
 ### How Alerts Work
 

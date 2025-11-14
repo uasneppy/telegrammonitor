@@ -1,4 +1,4 @@
-import { Telegraf } from 'telegraf';
+import { Telegraf, Markup } from 'telegraf';
 import { config } from './config.js';
 import {
   getOrCreateUser,
@@ -18,14 +18,23 @@ export function initBotApi() {
   bot = new Telegraf(config.botApi.token);
   
   bot.command('start', handleStart);
-  bot.command('help', handleHelp);
-  bot.command('cities', handleCities);
-  bot.command('addcity', handleAddCity);
-  bot.command('delcity', handleDelCity);
-  bot.command('threats', handleThreats);
-  bot.command('togglethreat', handleToggleThreat);
+  bot.command('menu', handleStart);
+  
+  bot.action('menu', handleMenuAction);
+  bot.action('cities', handleCitiesAction);
+  bot.action('addcity', handleAddCityAction);
+  bot.action('threats', handleThreatsAction);
+  bot.action('help', handleHelpAction);
+  
+  bot.action(/^delcity_(.+)$/, handleDeleteCityAction);
+  bot.action(/^toggle_(.+)$/, handleToggleThreatAction);
+  bot.action('cancel', handleCancelAction);
   
   bot.on('text', handleText);
+  
+  bot.catch((err, ctx) => {
+    console.error('Bot error:', err);
+  });
   
   bot.launch();
   console.log('✓ Bot API initialized and launched');
@@ -36,54 +45,80 @@ export function initBotApi() {
   return bot;
 }
 
+function getMainMenuKeyboard() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('🏙️ Мої міста', 'cities')],
+    [Markup.button.callback('⚠️ Типи загроз', 'threats')],
+    [Markup.button.callback('ℹ️ Допомога', 'help')],
+  ]);
+}
+
 async function handleStart(ctx) {
   const telegramUserId = ctx.from.id;
   getOrCreateUser(telegramUserId);
   
   await ctx.reply(
-    'Привіт. Я допомагаю відстежувати загрози для твоїх міст за повідомленнями з вибраних каналів.\n\n' +
-    'Використовуй /cities щоб налаштувати міста, /threats щоб налаштувати типи загроз, /help щоб отримати довідку.'
+    '👋 Привіт! Я допомагаю відстежувати загрози для твоїх міст.\n\n' +
+    '🔔 Ти отримаєш сповіщення про загрози в налаштованих локаціях.\n\n' +
+    '📍 Обери потрібний розділ:',
+    getMainMenuKeyboard()
   );
 }
 
-async function handleHelp(ctx) {
-  await ctx.reply(
-    '📋 Доступні команди:\n\n' +
-    '/start - почати роботу з ботом\n' +
-    '/cities - показати твої міста\n' +
-    '/addcity - додати місто\n' +
-    '/delcity - видалити місто\n' +
-    '/threats - налаштування типів загроз\n' +
-    '/togglethreat - змінити фільтр типу загрози\n' +
-    '/help - ця довідка'
+async function showMainMenu(ctx) {
+  await ctx.editMessageText(
+    '📍 Головне меню:\n\n' +
+    'Обери потрібний розділ:',
+    getMainMenuKeyboard()
   );
 }
 
-async function handleCities(ctx) {
+async function handleMenuAction(ctx) {
+  await ctx.answerCbQuery();
+  await showMainMenu(ctx);
+}
+
+async function showCitiesScreen(ctx) {
   const telegramUserId = ctx.from.id;
   const user = getOrCreateUser(telegramUserId);
   const locations = getUserLocations(user.id);
   
   if (locations.length === 0) {
-    await ctx.reply(
-      'У тебе поки немає збережених міст.\n\n' +
-      'Використовуй /addcity щоб додати місто.'
+    await ctx.editMessageText(
+      '🏙️ Мої міста\n\n' +
+      'У тебе поки немає збережених міст.\n' +
+      'Додай своє перше місто, щоб отримувати сповіщення про загрози.',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('➕ Додати місто', 'addcity')],
+        [Markup.button.callback('« Назад', 'menu')],
+      ])
     );
     return;
   }
   
-  let message = 'Твої міста:\n\n';
-  locations.forEach((loc, index) => {
+  let message = '🏙️ Мої міста\n\n';
+  
+  const buttons = [];
+  locations.forEach((loc) => {
     const oblast = loc.oblast_name ? ` (${loc.oblast_name})` : '';
-    message += `${index + 1}) ${loc.label} – ${loc.city_name}${oblast}\n`;
+    message += `📍 ${loc.label} – ${loc.city_name}${oblast}\n`;
+    buttons.push([Markup.button.callback(`🗑️ Видалити "${loc.label}"`, `delcity_${loc.id}`)]);
   });
   
-  message += '\nВикористовуй /addcity щоб додати місто, /delcity щоб видалити.';
+  buttons.push([Markup.button.callback('➕ Додати місто', 'addcity')]);
+  buttons.push([Markup.button.callback('« Назад', 'menu')]);
   
-  await ctx.reply(message);
+  await ctx.editMessageText(message, Markup.inlineKeyboard(buttons));
 }
 
-async function handleAddCity(ctx) {
+async function handleCitiesAction(ctx) {
+  await ctx.answerCbQuery();
+  await showCitiesScreen(ctx);
+}
+
+async function handleAddCityAction(ctx) {
+  await ctx.answerCbQuery();
+  
   const telegramUserId = ctx.from.id;
   const user = getOrCreateUser(telegramUserId);
   
@@ -93,68 +128,116 @@ async function handleAddCity(ctx) {
     userId: user.id,
   });
   
-  await ctx.reply('Введи коротку назву для цієї локації (наприклад, Дім, Батьки):');
+  await ctx.editMessageText(
+    '➕ Додавання міста\n\n' +
+    '📝 Крок 1 з 3\n\n' +
+    'Введи коротку назву для цієї локації:\n' +
+    '(наприклад: Дім, Батьки, Робота)',
+    Markup.inlineKeyboard([
+      [Markup.button.callback('❌ Скасувати', 'cancel')],
+    ])
+  );
 }
 
-async function handleDelCity(ctx) {
+async function handleDeleteCityAction(ctx) {
+  const locationId = parseInt(ctx.match[1]);
   const telegramUserId = ctx.from.id;
   const user = getOrCreateUser(telegramUserId);
   const locations = getUserLocations(user.id);
   
-  if (locations.length === 0) {
-    await ctx.reply('У тебе немає збережених міст для видалення.');
-    return;
+  const location = locations.find(loc => loc.id === locationId);
+  
+  if (location) {
+    deleteUserLocation(user.id, locationId);
+    await ctx.answerCbQuery('✅ Місто видалено');
+  } else {
+    await ctx.answerCbQuery();
   }
   
-  let message = 'Вибери номер міста для видалення:\n\n';
-  locations.forEach((loc, index) => {
-    const oblast = loc.oblast_name ? ` (${loc.oblast_name})` : '';
-    message += `${index + 1}) ${loc.label} – ${loc.city_name}${oblast}\n`;
-  });
-  
-  userStates.set(telegramUserId, {
-    command: 'delcity',
-    userId: user.id,
-    locations: locations,
-  });
-  
-  await ctx.reply(message);
+  await showCitiesScreen(ctx);
 }
 
-async function handleThreats(ctx) {
+async function showThreatsScreen(ctx) {
   const telegramUserId = ctx.from.id;
   const user = getOrCreateUser(telegramUserId);
   const filters = getUserThreatFilters(user.id);
   
   const activeFilters = new Set(filters.map(f => f.threat_type));
   
-  let message = 'Твої фільтри типів загроз:\n\n';
+  let message = '⚠️ Типи загроз\n\n';
+  message += 'Обери які типи загроз показувати:\n\n';
+  
+  const buttons = [];
   
   PREDEFINED_THREATS.forEach(threat => {
-    const status = activeFilters.has(threat) ? '✅ увімкнено' : '❌ вимкнено';
-    message += `${threat}: ${status}\n`;
+    const isActive = activeFilters.has(threat);
+    const emoji = isActive ? '✅' : '⬜️';
+    message += `${emoji} ${threat}\n`;
+    buttons.push([Markup.button.callback(`${emoji} ${threat}`, `toggle_${threat}`)]);
   });
   
-  message += '\nВикористовуй /togglethreat щоб змінити фільтри.';
+  message += '\n💡 Натисни на тип загрози, щоб увімкнути/вимкнути';
   
-  await ctx.reply(message);
+  buttons.push([Markup.button.callback('« Назад', 'menu')]);
+  
+  await ctx.editMessageText(message, Markup.inlineKeyboard(buttons));
 }
 
-async function handleToggleThreat(ctx) {
+async function handleThreatsAction(ctx) {
+  await ctx.answerCbQuery();
+  await showThreatsScreen(ctx);
+}
+
+async function handleToggleThreatAction(ctx) {
+  const threatType = ctx.match[1];
   const telegramUserId = ctx.from.id;
   const user = getOrCreateUser(telegramUserId);
   
-  userStates.set(telegramUserId, {
-    command: 'togglethreat',
-    userId: user.id,
-  });
+  toggleUserThreatFilter(user.id, threatType);
   
-  let message = 'Введи тип загрози для переключення:\n\n';
-  PREDEFINED_THREATS.forEach((threat, index) => {
-    message += `${index + 1}) ${threat}\n`;
-  });
+  await ctx.answerCbQuery('✅ Налаштування оновлено');
   
-  await ctx.reply(message);
+  await showThreatsScreen(ctx);
+}
+
+async function handleHelpAction(ctx) {
+  await ctx.answerCbQuery();
+  
+  await ctx.editMessageText(
+    'ℹ️ Довідка\n\n' +
+    '🤖 Як працює бот:\n' +
+    '• Моніторю канали з попередженнями про загрози\n' +
+    '• Аналізую повідомлення за допомогою AI\n' +
+    '• Надсилаю сповіщення про загрози для твоїх міст\n\n' +
+    '📍 Налаштування міст:\n' +
+    '• Додай свої міста в розділі "Мої міста"\n' +
+    '• Можеш додати декілька локацій (дім, батьки, робота)\n' +
+    '• Отримуватимеш сповіщення тільки для своїх міст\n\n' +
+    '⚠️ Типи загроз:\n' +
+    '• Обери які типи загроз тебе цікавлять\n' +
+    '• Стратегічні загрози (ракети, авіація) надсилаються всім\n' +
+    '• Локальні загрози фільтруються за твоїми містами\n\n' +
+    '🔔 Формат сповіщень:\n' +
+    '• Загроза: так/ні\n' +
+    '• Тип загрози\n' +
+    '• Локації\n' +
+    '• Опис ситуації\n' +
+    '• Час і ймовірність\n\n' +
+    '💬 Команди:\n' +
+    '/start або /menu - головне меню',
+    Markup.inlineKeyboard([
+      [Markup.button.callback('« Назад', 'menu')],
+    ])
+  );
+}
+
+async function handleCancelAction(ctx) {
+  await ctx.answerCbQuery('❌ Скасовано');
+  
+  const telegramUserId = ctx.from.id;
+  userStates.delete(telegramUserId);
+  
+  await showMainMenu(ctx);
 }
 
 async function handleText(ctx) {
@@ -168,10 +251,6 @@ async function handleText(ctx) {
   
   if (state.command === 'addcity') {
     await handleAddCityFlow(ctx, state, text);
-  } else if (state.command === 'delcity') {
-    await handleDelCityFlow(ctx, state, text);
-  } else if (state.command === 'togglethreat') {
-    await handleToggleThreatFlow(ctx, state, text);
   }
 }
 
@@ -181,61 +260,47 @@ async function handleAddCityFlow(ctx, state, text) {
   if (state.step === 'label') {
     state.label = text;
     state.step = 'city';
-    await ctx.reply('Введи назву міста (наприклад, Київ):');
+    await ctx.reply(
+      '➕ Додавання міста\n\n' +
+      '📝 Крок 2 з 3\n\n' +
+      'Введи назву міста:\n' +
+      '(наприклад: Київ, Львів, Одеса)',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('❌ Скасувати', 'cancel')],
+      ])
+    );
   } else if (state.step === 'city') {
     state.city = text;
     state.step = 'oblast';
-    await ctx.reply('Введи область (наприклад, Київська область) або напиши "-" якщо не хочеш вказувати:');
+    await ctx.reply(
+      '➕ Додавання міста\n\n' +
+      '📝 Крок 3 з 3\n\n' +
+      'Введи область:\n' +
+      '(наприклад: Київська область)\n\n' +
+      'або напиши "-" якщо не хочеш вказувати',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('❌ Скасувати', 'cancel')],
+      ])
+    );
   } else if (state.step === 'oblast') {
     const oblast = text === '-' ? null : text;
     
     addUserLocation(state.userId, state.label, state.city, oblast);
     
     const oblastText = oblast ? ` (${oblast})` : '';
-    await ctx.reply(`✅ Додано: ${state.label} – ${state.city}${oblastText}`);
+    
+    await ctx.reply(
+      `✅ Місто додано!\n\n` +
+      `📍 ${state.label} – ${state.city}${oblastText}\n\n` +
+      `Тепер ти отримуватимеш сповіщення про загрози для цієї локації.`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🏙️ Мої міста', 'cities')],
+        [Markup.button.callback('« Головне меню', 'menu')],
+      ])
+    );
     
     userStates.delete(telegramUserId);
   }
-}
-
-async function handleDelCityFlow(ctx, state, text) {
-  const telegramUserId = ctx.from.id;
-  const num = parseInt(text);
-  
-  if (isNaN(num) || num < 1 || num > state.locations.length) {
-    await ctx.reply('Невірний номер. Спробуй ще раз або скасуй командою /cities');
-    return;
-  }
-  
-  const location = state.locations[num - 1];
-  deleteUserLocation(state.userId, location.id);
-  
-  await ctx.reply(`✅ Видалено: ${location.label} – ${location.city_name}`);
-  userStates.delete(telegramUserId);
-}
-
-async function handleToggleThreatFlow(ctx, state, text) {
-  const telegramUserId = ctx.from.id;
-  const num = parseInt(text);
-  
-  if (isNaN(num) || num < 1 || num > PREDEFINED_THREATS.length) {
-    const threatType = text.toLowerCase().trim();
-    if (PREDEFINED_THREATS.includes(threatType)) {
-      toggleUserThreatFilter(state.userId, threatType);
-      await ctx.reply(`✅ Фільтр "${threatType}" переключено`);
-      userStates.delete(telegramUserId);
-      return;
-    }
-    
-    await ctx.reply('Невірний вибір. Спробуй ще раз або скасуй командою /threats');
-    return;
-  }
-  
-  const threatType = PREDEFINED_THREATS[num - 1];
-  toggleUserThreatFilter(state.userId, threatType);
-  
-  await ctx.reply(`✅ Фільтр "${threatType}" переключено`);
-  userStates.delete(telegramUserId);
 }
 
 export async function sendAlertMessage(telegramUserId, message) {

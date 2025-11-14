@@ -162,6 +162,7 @@ async function handleNewMessage(event, botApiSendFunction) {
       console.log(`   Threat: ${analysis.threat ? 'ТАК' : 'НІ'}`);
       console.log(`   Type: ${analysis.type}`);
       console.log(`   Locations: ${analysis.locations.join(', ') || 'невідомо'}`);
+      console.log(`   Strategic: ${analysis.strategic}`);
       
       if (analysis.threat) {
         await dispatchThreatAlert(analysis, botApiSendFunction);

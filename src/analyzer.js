@@ -1,8 +1,8 @@
 export function parseThreatAnalysis(rawText) {
   const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   
-  if (lines.length < 6) {
-    console.warn('⚠️ Gemini response has fewer than 6 lines, parsing may be incomplete');
+  if (lines.length < 7) {
+    console.warn('⚠️ Gemini response has fewer than 7 lines, parsing may be incomplete');
   }
   
   const analysis = {
@@ -12,6 +12,7 @@ export function parseThreatAnalysis(rawText) {
     description: '',
     time: 'невідомо',
     probability: 0,
+    strategic: 'невідомо',
     rawText: rawText,
   };
   
@@ -36,7 +37,27 @@ export function parseThreatAnalysis(rawText) {
       if (match) {
         analysis.probability = parseInt(match[0]);
       }
+    } else if (line.startsWith('Стратегічна:')) {
+      const value = line.substring('Стратегічна:'.length).trim().toLowerCase();
+      
+      if (value.includes('так') || value.includes('yes')) {
+        analysis.strategic = 'так';
+      } else if (value.includes('ні') || value.includes('no')) {
+        analysis.strategic = 'ні';
+      } else if (value.includes('невідомо') || value.includes('unknown')) {
+        analysis.strategic = 'невідомо';
+      } else if (value === '') {
+        console.warn('⚠️ Empty strategic field from AI');
+        analysis.strategic = 'невідомо';
+      } else {
+        console.warn(`⚠️ Unexpected strategic value from AI: "${value}"`);
+        analysis.strategic = 'невідомо';
+      }
     }
+  }
+  
+  if (!lines.some(line => line.startsWith('Стратегічна:'))) {
+    console.warn('⚠️ AI response missing "Стратегічна:" line - strategic field will default to невідомо');
   }
   
   return analysis;
@@ -46,19 +67,53 @@ const STRATEGIC_KEYWORDS = [
   'стратегічна авіація',
   'стратегічн',
   'шахед',
+  'шахід',
   'крилат',
   'міг-31',
+  'міг-к',
+  'mig-31',
   'кинджал',
+  'кінджал',
   'калібр',
+  'калібрів',
   'флот',
   'ту-95',
   'ту-160',
+  'tu-95',
+  'tu-160',
   'х-101',
   'х-555',
+  'x-101',
+  'x-555',
+  'балістика',
+  'балістичн',
+  'отрк',
+  'іскандер',
+  'ракетоносі',
+  'ракетоносці',
+  'брянськ',
+  'курськ',
+  'вороніж',
+  'масовий пуск',
+  'масових пуск',
 ];
 
 export function isStrategicThreat(analysis) {
-  const combinedText = `${analysis.type} ${analysis.description}`.toLowerCase();
+  if (analysis.strategic === 'так') {
+    return true;
+  }
   
+  if (analysis.strategic === 'ні') {
+    return false;
+  }
+  
+  if (analysis.strategic === 'невідомо') {
+    console.warn('⚠️ AI could not determine if threat is strategic, using keyword fallback');
+    const combinedText = `${analysis.type} ${analysis.description}`.toLowerCase();
+    return STRATEGIC_KEYWORDS.some(keyword => combinedText.includes(keyword));
+  }
+  
+  console.warn(`⚠️ Unexpected strategic value: "${analysis.strategic}", using keyword fallback`);
+  const combinedText = `${analysis.type} ${analysis.description}`.toLowerCase();
   return STRATEGIC_KEYWORDS.some(keyword => combinedText.includes(keyword));
 }
