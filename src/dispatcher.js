@@ -12,18 +12,21 @@ export async function dispatchThreatAlert(analysis, botApiSendFunction) {
   
   console.log(`📢 Dispatching threat alert (strategic: ${isStrategic})`);
   
-  for (const user of users) {
-    const shouldNotify = isStrategic || shouldNotifyUser(user, analysis);
-    
-    if (shouldNotify) {
-      try {
-        await sendAlertToUser(user.telegram_user_id, analysis, botApiSendFunction);
-        console.log(`✓ Alert sent to user ${user.telegram_user_id}`);
-      } catch (error) {
-        console.error(`❌ Failed to send alert to user ${user.telegram_user_id}:`, error.message);
-      }
-    }
-  }
+  const alertPromises = users
+    .filter(user => isStrategic || shouldNotifyUser(user, analysis))
+    .map(user => 
+      sendAlertToUser(user.telegram_user_id, analysis, botApiSendFunction)
+        .then(() => {
+          console.log(`✓ Alert sent to user ${user.telegram_user_id}`);
+          return { userId: user.telegram_user_id, success: true };
+        })
+        .catch(error => {
+          console.error(`❌ Failed to send alert to user ${user.telegram_user_id}:`, error.message);
+          return { userId: user.telegram_user_id, success: false, error: error.message };
+        })
+    );
+  
+  await Promise.allSettled(alertPromises);
 }
 
 function shouldNotifyUser(user, analysis) {

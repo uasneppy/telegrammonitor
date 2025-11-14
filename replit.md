@@ -27,6 +27,11 @@ A Node.js application that monitors Telegram channels for threat alerts using MT
   - Robust parser with fallback handling for AI response variations
   - Comprehensive keyword fallback for resilience (30+ variations)
   - Defensive warnings when AI returns unexpected or missing data
+- **Performance optimizations**
+  - Parallelized alert dispatching (sends to all users simultaneously)
+  - Message deduplication cache (skips re-analyzing duplicates within 60s)
+  - Reduced context from 10 to 5 messages (faster AI responses)
+  - Channel-specific dedup keys prevent cross-channel false positives
 
 ## Architecture
 
@@ -82,12 +87,13 @@ A Node.js application that monitors Telegram channels for threat alerts using MT
 ## Key Features
 - **Terminal-based OTP** - User-bot login via stdin/stdout only
 - **Session persistence** - MTProto session saved as JSON
-- **Context-aware analysis** - Gemini receives 10-20 recent messages
+- **Context-aware analysis** - Gemini receives 4-5 recent messages for context
 - **AI-based strategic detection** - Gemini determines if threats are strategic (not keyword-based)
   - Primary: AI classification via "Стратегічна: так/ні/невідомо" field
   - Fallback: 30+ keyword patterns (TU-95, shaheds, cruise missiles, Kalibr, etc.)
   - Handles Cyrillic/Latin variants, plurals, and spelling variations
 - **Smart filtering** - Strategic threats sent to all users; local threats filtered by location
+- **Performance optimized** - Parallel alert dispatch, deduplication cache, reduced AI latency
 - **Ukrainian interface** - All bot responses in Ukrainian, commands in English
 - **Automatic cleanup** - Only last 20 messages kept per channel
 

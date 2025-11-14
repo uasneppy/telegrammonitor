@@ -8,8 +8,13 @@ import { parseThreatAnalysis } from './analyzer.js';
 import { dispatchThreatAlert } from './dispatcher.js';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import readline from 'readline';
+import crypto from 'crypto';
 
 let client = null;
+
+const recentMessageHashes = new Map();
+const DEDUP_WINDOW_MS = 60000;
+const MAX_CACHE_SIZE = 100;
 
 export async function initMTProtoClient(botApiSendFunction) {
   console.log('🔐 Initializing MTProto client...');
@@ -146,7 +151,25 @@ async function handleNewMessage(event, botApiSendFunction) {
     
     console.log(`\n📨 New message from channel ${channel.username || channelId}`);
     
-    const recentMessages = getRecentMessages(channel.id, 10);
+    const dedupKey = `${channelId}:${crypto.createHash('sha256').update(messageText.toLowerCase().trim()).digest('hex').substring(0, 16)}`;
+    
+    const now = Date.now();
+    if (recentMessageHashes.has(dedupKey)) {
+      const lastSeen = recentMessageHashes.get(dedupKey);
+      if (now - lastSeen < DEDUP_WINDOW_MS) {
+        console.log(`⏭️ Skipping duplicate message from ${channel.username || channelId} (seen in last 60s)`);
+        return;
+      }
+    }
+    
+    recentMessageHashes.set(dedupKey, now);
+    
+    if (recentMessageHashes.size > MAX_CACHE_SIZE) {
+      const oldestKey = recentMessageHashes.keys().next().value;
+      recentMessageHashes.delete(oldestKey);
+    }
+    
+    const recentMessages = getRecentMessages(channel.id, 5);
     
     try {
       const rawAnalysis = await analyzeThreat({
