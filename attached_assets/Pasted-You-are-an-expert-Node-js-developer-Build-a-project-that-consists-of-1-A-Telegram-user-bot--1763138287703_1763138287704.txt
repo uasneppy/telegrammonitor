@@ -1,0 +1,366 @@
+You are an expert Node.js developer.
+
+Build a project that consists of:
+
+1) A **Telegram user-bot** (MTProto client) that:
+   - Logs in as a normal Telegram user.
+   - Subscribes to and listens for new messages in specified Telegram channels.
+   - For each new message, collects recent context from that channel, sends it to Google Gemini 2.5 Flash for analysis, and receives a structured 6-line Ukrainian summary about the threat.
+
+2) A **Telegram Bot API bot** (classic bot with token) that:
+   - Handles commands from users (the owner and family) in private chats.
+   - Stores user settings (cities, oblasts, threat type filters).
+   - Sends final alerts to users based on the analysis result from Gemini.
+   - All outgoing user-facing messages are sent **only** through this Bot API bot.
+
+The scale is small: personal use for the owner and family, so you can keep the implementation simple but robust.
+
+Use **Node.js** with ECMAScript modules (`"type": "module"` in package.json).
+
+---
+
+## Tech stack and libraries
+
+Use:
+
+- MTProto user client:
+  - Use a maintained MTProto client library for Node.js, such as `telegram` (gramjs) or similar.
+  - It must support logging in via phone number + OTP.
+- Telegram Bot API:
+  - Use a common library such as `telegraf` or `node-telegram-bot-api`.
+- Database:
+  - Use SQLite via `better-sqlite3` (preferred) or `sqlite3`.
+- Gemini:
+  - Use the official Google Gemini Node.js SDK: `@google/generative-ai`.
+- Config:
+  - Use `dotenv` for environment variables.
+
+---
+
+## Environment variables
+
+Assume these environment variables:
+
+- `TELEGRAM_API_ID` – MTProto API ID.
+- `TELEGRAM_API_HASH` – MTProto API hash.
+- `TELEGRAM_SESSION_FILE` – path to a file where you will store the serialized MTProto session (for example `./data/session.json`).
+- `TELEGRAM_PHONE_NUMBER` – phone number (e.g. +380...) for the user-bot login.
+
+- `TELEGRAM_BOT_TOKEN` – token of the Bot API bot that will handle commands and send alerts.
+
+- `GEMINI_API_KEY` – API key for Google Gemini.
+- `DB_PATH` – SQLite file path, default to `./data/settings.db` if not set.
+
+Also create a `data/` folder automatically if it does not exist.
+
+---
+
+## Login and OTP (user-bot only, via terminal)
+
+This is very important:
+
+- The **user-bot** (MTProto client) must handle login using phone number and OTP only via the terminal (stdin/stdout), not via Telegram chat, and not via request_contact.
+
+On startup of the MTProto part:
+
+1. If the `TELEGRAM_SESSION_FILE` exists and contains a valid serialized session:
+   - Load and use it, do not ask for OTP.
+
+2. If there is no session file or the session is invalid:
+   - Read `TELEGRAM_PHONE_NUMBER` from env.
+   - If missing, print to console something like: `Please set TELEGRAM_PHONE_NUMBER in .env` and exit.
+   - Initiate MTProto login:
+     - Request a login code to that phone number.
+     - Print to console: `Enter OTP code from Telegram:`.
+     - Read OTP from stdin (for example using `readline`).
+     - Complete login.
+   - After successful login, serialize the session and save it into `TELEGRAM_SESSION_FILE` as JSON or plain string.
+   - Next runs must reuse this session without asking OTP again.
+
+The Bot API bot does not need any OTP.
+
+---
+
+## General architecture
+
+Project file structure (you can adjust naming if needed, but keep it organized):
+
+- `package.json`
+- `src/config.js` – load env vars and export configuration.
+- `src/db.js` – initialize SQLite, create tables if they do not exist, provide helper methods.
+- `src/geminiClient.js` – initialize Gemini client, provide a function `analyzeThreat({ channelName, recentMessages, newMessageText })`.
+- `src/mtprotoClient.js` – MTProto user-bot: login, subscribe to channels, listen for new messages, pass them to analyzer.
+- `src/botApi.js` – Bot API bot: set up commands, handle user settings, send alerts.
+- `src/analyzer.js` – build prompt for Gemini, parse 6-line result, decide what to do with it.
+- `src/dispatcher.js` – given an analyzed threat, decide which users should be notified and send messages via Bot API.
+- `src/index.js` – main entrypoint that starts both the user-bot and the Bot API bot.
+
+You can merge some modules together if it becomes too noisy, but the logic must be clean and commented.
+
+---
+
+## Database schema (SQLite)
+
+Create tables to support:
+
+1) `users`
+- `id` INTEGER PRIMARY KEY AUTOINCREMENT
+- `telegram_user_id` INTEGER UNIQUE NOT NULL   -- Bot API user id
+- `created_at` TEXT
+- `updated_at` TEXT
+
+2) `user_locations`  (user cities/oblasts)
+- `id` INTEGER PRIMARY KEY AUTOINCREMENT
+- `user_id` INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE
+- `label` TEXT NOT NULL             -- e.g. "Дім", "Батьки"
+- `city_name` TEXT NOT NULL         -- e.g. "Київ"
+- `oblast_name` TEXT                -- e.g. "Київська область"
+- `active` INTEGER NOT NULL DEFAULT 1
+
+3) `user_threat_filters`
+- `id` INTEGER PRIMARY KEY AUTOINCREMENT
+- `user_id` INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE
+- `threat_type` TEXT NOT NULL       -- free text from the analyzer, e.g. "ракети", "шахеди"
+- `active` INTEGER NOT NULL DEFAULT 1
+
+4) `channels`
+- `id` INTEGER PRIMARY KEY AUTOINCREMENT
+- `telegram_channel_id` BIGINT UNIQUE NOT NULL
+- `username` TEXT        -- @channel name if available
+- `title` TEXT
+- `is_active` INTEGER NOT NULL DEFAULT 1
+
+Channels can be configured in DB or in a simple JSON file that is synced into DB on startup. For the first version, you can hardcode them in a list in config and insert them if missing.
+
+5) `channel_messages`
+- `id` INTEGER PRIMARY KEY AUTOINCREMENT
+- `channel_id` INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE
+- `message_id` BIGINT NOT NULL
+- `message_date` INTEGER             -- unix timestamp (seconds)
+- `raw_text` TEXT
+
+Use this table to store the last N messages per channel, for example 20, to build context for Gemini. Implement a cleanup so that only the 20 most recent messages per channel are kept.
+
+---
+
+## Commands and language (Bot API bot)
+
+All **commands** are in English. All bot **responses** and alert texts are in **Ukrainian**.
+
+Implement at least these commands in the Bot API bot:
+
+1. `/start`
+   - Register user in DB if not exists.
+   - Save `telegram_user_id` from chat.
+   - Reply in Ukrainian, e.g.:
+     - "Привіт. Я допомагаю відстежувати загрози для твоїх міст за повідомленнями з вибраних каналів. Використовуй /cities щоб налаштувати міста, /areas щоб налаштувати області, /threats щоб налаштувати типи загроз."
+
+2. `/cities`
+   - Show current list of user locations (міста + області) in a simple text list.
+   - Example output:
+     - "Твої міста:
+        1) Дім – Київ (Київська область)
+        2) Батьки – Дніпро (Дніпропетровська область)
+        Використовуй /addcity щоб додати місто, /delcity щоб видалити."
+
+3. `/addcity`
+   - Interactive flow in Ukrainian, but command is `/addcity`.
+   - Steps:
+     - Ask: "Введи коротку назву для цієї локації (наприклад, Дім, Батьки):"
+     - Then: "Введи назву міста (наприклад, Київ):"
+     - Потім: "Введи область (наприклад, Київська область) або напиши '-' якщо не хочеш вказувати:"
+   - Save the new `user_locations` row.
+
+4. `/delcity`
+   - Show numbered list of current locations.
+   - Ask user to reply with a number to delete.
+   - Mark that location as inactive or delete it physically.
+
+5. `/threats`
+   - Show current threat filters for the user.
+   - For first version you can make it very simple: either:
+     - a) "Показувати всі типи загроз", or
+     - b) Filter by a few common types.
+   - For example:
+     - "Твої фільтри:
+        - ракети: увімкнено
+        - шахеди: вимкнено
+        - артобстріл: увімкнено
+      Напиши /togglethreat щоб змінити."
+
+   You can implement a simpler version where the user chooses from a small, predefined list of threat types and you store them in `user_threat_filters`.
+
+6. `/help`
+   - Short help text in Ukrainian describing available commands.
+
+You do not need group commands for now. Assume the Bot API bot works only in private chats with users.
+
+---
+
+## Real-time pipeline
+
+The project must process channel messages in near real time.
+
+### MTProto user-bot flow
+
+- On startup:
+  - Log in with MTProto (using session file and OTP if needed).
+  - Ensure the client is joined to the required channels. You can:
+    - either join them programmatically by username,
+    - or assume the user account is already subscribed to them.
+- Subscribe to new messages in these channels.
+- For each new message event:
+  - Identify the channel (by id / username).
+  - Save the message into `channel_messages`.
+  - Fetch the last N messages (e.g. 10–20) from that channel, including the new one, ordered by time, to build context.
+
+### Calling Gemini
+
+Create a Gemini client module `geminiClient.js` that uses `@google/generative-ai` and exposes something like:
+
+```js
+async function analyzeThreat({ channelName, recentMessages, newMessageText }) {
+  // returns the raw 6-line text from Gemini
+}
+Prompt for Gemini
+The model should get a prompt that:
+
+Explains its role.
+
+Provides recent context messages from that channel.
+
+Highlights the newest message.
+
+Provides instructions to respond strictly in 6 lines.
+
+Use this Ukrainian prompt template (you can adapt slightly for code, but keep semantics):
+
+System/Instruction part (in Ukrainian):
+
+"Ти – український аналітик реальних загроз.
+Відповідай лише у форматі шести рядків (ніякого JSON):
+Загроза: так/ні
+Тип: <тип загрози або "невідомо">
+Локації: <перелік регіонів/міст через кому або "невідомо">
+Опис: <1–2 нейтральні речення з підсумком>
+Час: <час/дата з повідомлення або "невідомо">
+Ймовірність: <число 0–100 із знаком %>
+
+Правила:
+
+Якщо немає реальної або потенційної загрози, напиши "Загроза: ні".
+
+Якщо є повідомлення по типу «чисто», «дорозвідка» – повідомляй.
+
+Не додавай даних, яких немає в повідомленні, та не вигадуй від себе.
+
+Якщо локація незрозуміла, вкажи "невідомо".
+
+Якщо тип загрози незрозумілий, вкажи "невідомо".
+
+Не копіюй оригінальний текст, лише роби аналітичний підсумок.
+
+Якщо повідомляється про активність на бойових частотах стратегічної авіації, зліт стратегічної авіації, пуски «шахедів», пуски крилатих ракет будь-якого типу, зліт МІГ-31К, пуск «Кинджала», вихід флоту в море – попередження надається незалежно від локації. Будь-що, що може дістати будь-де – вважай загрозою.
+
+Всі канали можуть говорити про одну й ту саму загрозу. Аналізуй кожне повідомлення, але не перебільшуй важливість, якщо загроза вже описана раніше.
+
+Ігноруй повідомлення-звіти, де вказуються постраждалі, жертви, влучання, кількість застосованого ворогом озброєння за день чи ніч тощо.
+
+Опис має бути спокійним, без паніки та оціночних суджень."
+
+You also need to pass context messages. For example:
+
+"Попередні повідомлення каналу (від старих до нових):"
+
+Then list them as:
+
+"[2025-11-14 10:01] Текст..."
+
+"[2025-11-14 10:03] Текст..."
+
+Then:
+
+"Нове повідомлення, яке треба проаналізувати:"
+
+"<текст нового повідомлення>"
+
+Ask Gemini to respond strictly in 6 lines, exactly matching the structure above, without extra explanations.
+
+Parsing and dispatching results
+In analyzer.js:
+
+Implement a function that:
+
+Takes the raw 6-line text from Gemini.
+
+Parses it into a JavaScript object:
+
+threat (boolean from "Загроза: так/ні")
+
+type (string from "Тип:")
+
+locations (array of locations from "Локації:", split by comma and trimmed)
+
+description (string from "Опис:")
+
+time (string from "Час:")
+
+probability (number from "Ймовірність:")
+
+If threat is "ні", you can ignore this event (do not send alerts), unless you want to log it.
+
+In dispatcher.js:
+
+For each analyzed threat with threat === true (or "так"):
+
+Determine which users should be notified:
+
+If the type describes a strategic or country-wide threat (e.g. "стратегічна авіація", "пуски крилатих ракет", "шахеди", "МІГ-31К", "Кинджал", "флот"):
+
+Notify all users.
+
+Otherwise:
+
+Match locations returned by Gemini with each user's user_locations:
+
+If any of the user's city_name or oblast_name appears (case-insensitive, partial match allowed), consider that user affected.
+
+Also apply threat type filters:
+
+If user has user_threat_filters set and the Gemini type does not match any active filter, skip this user.
+
+If a user must be alerted:
+
+Use the Bot API bot to send them a message.
+
+The body of the message should be exactly the 6-line Ukrainian text from Gemini, optionally you can prepend a single line like "⚠️ Нова загроза:" but for simplicity you can send exactly what Gemini produced.
+
+Real-time behavior
+Use update handlers / event listeners of the MTProto library to react to messages as soon as possible.
+
+There should be no artificial queue with minutes of delay.
+
+Simple in-process dispatching is enough for this small scale.
+
+Extra requirements
+Add basic error handling and console logs for:
+
+MTProto login problems.
+
+Gemini API failures.
+
+Database errors.
+
+If Gemini API fails for a specific message, you can log the error and skip that message (no need to crash the whole process).
+
+Add a small README.md in the project root with:
+
+How to install dependencies.
+
+How to create .env.
+
+How to run the bot (e.g. node src/index.js).
+
+The note that user must obtain Telegram API ID/HASH and subscribe the user account to the desired channels manually (for now).
+
+Write clean, commented code so that a non-developer can roughly understand where to change channel list, settings, etc.

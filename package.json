@@ -1,0 +1,21 @@
+{
+  "name": "telegram-threat-monitor",
+  "version": "1.0.0",
+  "description": "Telegram threat monitoring system with MTProto user-bot and Bot API for alerts",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "keywords": ["telegram", "monitoring", "gemini", "mtproto"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "telegram": "^2.25.16",
+    "telegraf": "^4.16.3",
+    "better-sqlite3": "^11.7.0",
+    "@google/generative-ai": "^0.21.0",
+    "dotenv": "^16.4.5",
+    "input": "^1.0.1"
+  }
+}
