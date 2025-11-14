@@ -10,17 +10,16 @@ A Node.js application that monitors Telegram channels for threat alerts using MT
 ## Recent Changes (November 14, 2025)
 - Initial project setup with ES modules architecture
 - Implemented MTProto user-bot with terminal-based OTP authentication
-- **Redesigned Bot API with modern inline keyboard interface**
-  - Interactive buttons for all user actions
+- **Redesigned Bot API with modern reply keyboard interface**
+  - Reply keyboards (persistent buttons at bottom of chat)
   - Visual status indicators (✅/⬜️) for threat filters
-  - One-tap city deletion and threat toggling
+  - Number-based city deletion
   - Emoji-decorated navigation with back buttons
-  - Eliminated text-based command flows
+  - Robust state management with cancel/back handling
 - Integrated Google Gemini 2.5 Flash for threat analysis
-- Built SQLite database with 5 tables for user management
+- Built SQLite database with 6 tables for user management and alert history
 - Implemented smart threat dispatcher with location/type filtering
 - Added comprehensive README with setup instructions
-- Fixed callback query handling to prevent double-answering errors
 - **Enhanced AI-based strategic threat detection**
   - Gemini AI now determines strategic threats instead of keyword matching
   - 7-line AI response format includes "Стратегічна: так/ні/невідомо"
@@ -30,24 +29,30 @@ A Node.js application that monitors Telegram channels for threat alerts using MT
 - **Performance optimizations**
   - Parallelized alert dispatching (sends to all users simultaneously)
   - Message deduplication cache (skips re-analyzing duplicates within 60s)
+  - Optimized dispatcher to pass userId directly (avoid O(n²) lookups)
   - Reduced context from 10 to 5 messages (faster AI responses)
   - Channel-specific dedup keys prevent cross-channel false positives
-- **Beautiful alert formatting**
-  - HTML-formatted messages with bold/italic styling
-  - Dynamic emojis based on threat type (🚨 strategic, 🚀 missiles, 🛩️ drones, etc.)
-  - Color-coded probability indicators (🔴 High, 🟡 Medium, 🟢 Low)
-  - Visual dividers and structured sections for easy reading
-  - HTML escaping for security and reliability
+- **Clean alert formatting with Markdown**
+  - Markdown-formatted messages (*bold* labels)
+  - Simple, readable structure: Регіони, Тип, Опис, Ймовірність
+  - Color-coded probability indicators (🔴 висока, 🟡 середня, 🟢 низька)
+  - No excessive emojis or dividers
+- **Summary feature (/summary command)**
+  - 6 time period options: 10 min, 30 min, 1 hour, 3 hours, 7 hours, 10 hours
+  - AI-powered summary generation using Gemini 2.0 Flash
+  - Fallback to manual summary when AI unavailable
+  - Stores all sent alerts in database for historical analysis
+  - Provides threat count, types, and affected regions
 
 ## Architecture
 
 ### Core Modules
 1. **src/config.js** - Environment variable loading and validation
-2. **src/db.js** - SQLite database with users, locations, filters, channels, messages
+2. **src/db.js** - SQLite database with users, locations, filters, channels, messages, sent_alerts
 3. **src/geminiClient.js** - Gemini AI integration for threat analysis with strategic detection
 4. **src/analyzer.js** - Parse 7-line Ukrainian threat summaries from Gemini with AI-based strategic classification
-5. **src/dispatcher.js** - Match threats to users based on location/type filters
-6. **src/botApi.js** - Telegraf bot with Ukrainian commands (/start, /cities, /addcity, /delcity, /threats, /help)
+5. **src/dispatcher.js** - Match threats to users based on location/type filters, save alert history
+6. **src/botApi.js** - Telegraf bot with reply keyboards and commands (/start, /menu, /summary)
 7. **src/mtprotoClient.js** - MTProto user-bot for channel monitoring with session persistence
 8. **src/index.js** - Main entry point that orchestrates all components
 
@@ -89,6 +94,7 @@ A Node.js application that monitors Telegram channels for threat alerts using MT
 - **user_threat_filters** - Threat type preferences per user
 - **channels** - Monitored Telegram channels
 - **channel_messages** - Last 20 messages per channel for context
+- **sent_alerts** - Historical record of all alerts sent to users (for summaries)
 
 ## Key Features
 - **Terminal-based OTP** - User-bot login via stdin/stdout only
@@ -99,7 +105,10 @@ A Node.js application that monitors Telegram channels for threat alerts using MT
   - Fallback: 30+ keyword patterns (TU-95, shaheds, cruise missiles, Kalibr, etc.)
   - Handles Cyrillic/Latin variants, plurals, and spelling variations
 - **Smart filtering** - Strategic threats sent to all users; local threats filtered by location
-- **Performance optimized** - Parallel alert dispatch, deduplication cache, reduced AI latency
+- **Performance optimized** - Parallel alert dispatch, deduplication cache, reduced AI latency, optimized database queries
+- **Reply keyboard interface** - Persistent buttons for easy navigation, robust state management
+- **Summary reports** - AI-generated threat summaries for customizable time periods (10 min to 10 hours)
+- **Alert history** - All sent alerts stored in database for historical analysis
 - **Ukrainian interface** - All bot responses in Ukrainian, commands in English
 - **Automatic cleanup** - Only last 20 messages kept per channel
 
@@ -132,5 +141,9 @@ telegram-threat-monitor/
 2. Ensure Telegram account is subscribed to target channels
 3. Run `npm start` and complete OTP authentication
 4. Start bot chat with `/start` command
-5. Configure cities with `/addcity`
-6. Optionally configure threat filters with `/togglethreat`
+5. Use the reply keyboard buttons to navigate:
+   - 🏙️ Мої міста - Add/manage your cities
+   - ⚠️ Типи загроз - Toggle threat type filters
+   - 📊 Зведення - Get threat summaries
+   - ℹ️ Допомога - View help information
+6. Use `/summary` command or button to view threat reports for different time periods

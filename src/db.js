@@ -55,9 +55,22 @@ function createTables() {
       raw_text TEXT
     );
     
+    CREATE TABLE IF NOT EXISTS sent_alerts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      sent_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      locations TEXT,
+      type TEXT,
+      description TEXT,
+      probability INTEGER,
+      is_strategic INTEGER DEFAULT 0
+    );
+    
     CREATE INDEX IF NOT EXISTS idx_user_locations_user_id ON user_locations(user_id);
     CREATE INDEX IF NOT EXISTS idx_user_threat_filters_user_id ON user_threat_filters(user_id);
     CREATE INDEX IF NOT EXISTS idx_channel_messages_channel_id ON channel_messages(channel_id);
+    CREATE INDEX IF NOT EXISTS idx_sent_alerts_user_id ON sent_alerts(user_id);
+    CREATE INDEX IF NOT EXISTS idx_sent_alerts_sent_at ON sent_alerts(sent_at);
   `);
 }
 
@@ -157,6 +170,28 @@ export function getRecentMessages(channelId, limit = 20) {
     ORDER BY message_date DESC
     LIMIT ?
   `).all(channelId, limit).reverse();
+}
+
+export function saveSentAlert(userId, analysis, isStrategic) {
+  const locations = Array.isArray(analysis.locations) ? analysis.locations.join(', ') : (analysis.locations || '');
+  
+  return db.prepare(`
+    INSERT INTO sent_alerts (user_id, locations, type, description, probability, is_strategic)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(userId, locations, analysis.type || '', analysis.description || '', analysis.probability || 0, isStrategic ? 1 : 0);
+}
+
+export function getUserAlerts(userId, minutesAgo) {
+  const timestamp = new Date(Date.now() - minutesAgo * 60 * 1000)
+    .toISOString()
+    .replace('T', ' ')
+    .slice(0, 19);
+  
+  return db.prepare(`
+    SELECT * FROM sent_alerts
+    WHERE user_id = ? AND sent_at >= ?
+    ORDER BY sent_at DESC
+  `).all(userId, timestamp);
 }
 
 export function getDatabase() {

@@ -1,4 +1,4 @@
-import { getAllUsers, getUserLocations, getUserThreatFilters } from './db.js';
+import { getAllUsers, getUserLocations, getUserThreatFilters, saveSentAlert } from './db.js';
 import { isStrategicThreat } from './analyzer.js';
 
 export async function dispatchThreatAlert(analysis, botApiSendFunction) {
@@ -15,7 +15,7 @@ export async function dispatchThreatAlert(analysis, botApiSendFunction) {
   const alertPromises = users
     .filter(user => isStrategic || shouldNotifyUser(user, analysis))
     .map(user => 
-      sendAlertToUser(user.telegram_user_id, analysis, botApiSendFunction, isStrategic)
+      sendAlertToUser(user.telegram_user_id, analysis, botApiSendFunction, isStrategic, user.id)
         .then(() => {
           console.log(`✓ Alert sent to user ${user.telegram_user_id}`);
           return { userId: user.telegram_user_id, success: true };
@@ -98,7 +98,11 @@ function formatThreatAlert(analysis, isStrategic) {
   return message;
 }
 
-async function sendAlertToUser(telegramUserId, analysis, botApiSendFunction, isStrategic) {
+async function sendAlertToUser(telegramUserId, analysis, botApiSendFunction, isStrategic, userId) {
   const message = formatThreatAlert(analysis, isStrategic);
   await botApiSendFunction(telegramUserId, message, { parse_mode: 'Markdown' });
+  
+  if (userId) {
+    saveSentAlert(userId, analysis, isStrategic);
+  }
 }
