@@ -1,5 +1,7 @@
-import { getAllUsers, getUserLocations, getUserThreatFilters, saveSentAlert, getUserIgnoredWords } from './db.js';
+import { getAllUsers, getUserLocations, getUserThreatFilters, saveSentAlert, getUserIgnoredWords, getUserGPSLocation } from './db.js';
 import { isStrategicThreat } from './analyzer.js';
+import { getCoordinatesForLocation } from './geocoding.js';
+import { calculateDistance, formatDistance } from './distance.js';
 
 export async function dispatchThreatAlert(analysis, botApiSendFunction) {
   if (!analysis.threat) {
@@ -12,25 +14,41 @@ export async function dispatchThreatAlert(analysis, botApiSendFunction) {
   
   console.log(`📢 Dispatching threat alert (strategic: ${isStrategic})`);
   
-  const alertPromises = users
-    .filter(user => {
-      if (hasIgnoredWords(user, analysis)) {
-        console.log(`⊘ Skipping user ${user.telegram_user_id} due to ignored word match`);
-        return false;
-      }
-      return isStrategic || shouldNotifyUser(user, analysis);
-    })
-    .map(user => 
-      sendAlertToUser(user.telegram_user_id, analysis, botApiSendFunction, isStrategic, user.id)
-        .then(() => {
-          console.log(`✓ Alert sent to user ${user.telegram_user_id}`);
-          return { userId: user.telegram_user_id, success: true };
-        })
-        .catch(error => {
-          console.error(`❌ Failed to send alert to user ${user.telegram_user_id}:`, error.message);
-          return { userId: user.telegram_user_id, success: false, error: error.message };
-        })
-    );
+  const proximityCache = new Map();
+  
+  const usersToNotify = users.filter(user => {
+    if (hasIgnoredWords(user, analysis)) {
+      console.log(`⊘ Skipping user ${user.telegram_user_id} due to ignored word match`);
+      return false;
+    }
+    
+    if (isStrategic) {
+      return true;
+    }
+    
+    const proximityInfo = checkProximityWarning(user, analysis);
+    proximityCache.set(user.id, proximityInfo);
+    
+    if (proximityInfo) {
+      console.log(`📍 Proximity match for user ${user.telegram_user_id}: ${proximityInfo.distance.toFixed(1)} km from ${proximityInfo.locationName}`);
+      return true;
+    }
+    
+    return shouldNotifyUser(user, analysis);
+  });
+  
+  const alertPromises = usersToNotify.map(user => {
+    const proximityInfo = proximityCache.get(user.id);
+    return sendAlertToUser(user.telegram_user_id, analysis, botApiSendFunction, isStrategic, user.id, proximityInfo)
+      .then(() => {
+        console.log(`✓ Alert sent to user ${user.telegram_user_id}`);
+        return { userId: user.telegram_user_id, success: true };
+      })
+      .catch(error => {
+        console.error(`❌ Failed to send alert to user ${user.telegram_user_id}:`, error.message);
+        return { userId: user.telegram_user_id, success: false, error: error.message };
+      });
+  });
   
   await Promise.allSettled(alertPromises);
 }
@@ -93,10 +111,55 @@ function getProbabilityIndicator(probability) {
   return '⚪ невідомо';
 }
 
-function formatThreatAlert(analysis, isStrategic) {
+function checkProximityWarning(user, analysis) {
+  const gpsLocation = getUserGPSLocation(user.id);
+  
+  if (!gpsLocation || !gpsLocation.latitude || !gpsLocation.longitude) {
+    return null;
+  }
+  
+  if (!analysis.locations || analysis.locations.length === 0) {
+    return null;
+  }
+  
+  const proximityRadius = gpsLocation.proximity_radius || 20;
+  let closestThreat = null;
+  
+  for (const locationName of analysis.locations) {
+    const coords = getCoordinatesForLocation(locationName);
+    
+    if (coords) {
+      const distance = calculateDistance(
+        gpsLocation.latitude,
+        gpsLocation.longitude,
+        coords.lat,
+        coords.lon
+      );
+      
+      if (distance <= proximityRadius) {
+        if (!closestThreat || distance < closestThreat.distance) {
+          closestThreat = {
+            locationName,
+            distance,
+            coordinates: coords
+          };
+        }
+      }
+    }
+  }
+  
+  return closestThreat;
+}
+
+function formatThreatAlert(analysis, isStrategic, proximityInfo) {
   let message = `⚠️ *Загроза зафіксована*\n\n`;
   
-  // Регіони
+  if (proximityInfo) {
+    message = `🚨 *ЗАГРОЗА ПОБЛИЗУ!*\n\n`;
+    message += `📍 *Відстань від вас:* ${formatDistance(proximityInfo.distance)}\n`;
+    message += `📌 *Локація загрози:* ${proximityInfo.locationName}\n\n`;
+  }
+  
   message += `*Регіони:* `;
   if (analysis.locations && analysis.locations.length > 0) {
     message += `${analysis.locations.join(', ')}\n`;
@@ -104,23 +167,23 @@ function formatThreatAlert(analysis, isStrategic) {
     message += `невідомо\n`;
   }
   
-  // Тип
   message += `*Тип:* ${analysis.type || 'невідомо'}\n`;
   
-  // Опис
   message += `*Опис:* ${analysis.description || 'Інформація відсутня'}\n`;
   
-  // Ймовірність
   message += `*Ймовірність:* ${getProbabilityIndicator(analysis.probability || 0)}\n\n`;
   
-  // Заключне повідомлення
+  if (proximityInfo) {
+    message += `⚠️ Загроза знаходиться в радіусі ${formatDistance(proximityInfo.distance)} від вашого місцезнаходження. Будьте обережні!\n\n`;
+  }
+  
   message += `Слідкуйте за офіційними повідомленнями та дотримуйтесь безпеки.`;
   
   return message;
 }
 
-async function sendAlertToUser(telegramUserId, analysis, botApiSendFunction, isStrategic, userId) {
-  const message = formatThreatAlert(analysis, isStrategic);
+async function sendAlertToUser(telegramUserId, analysis, botApiSendFunction, isStrategic, userId, proximityInfo) {
+  const message = formatThreatAlert(analysis, isStrategic, proximityInfo);
   await botApiSendFunction(telegramUserId, message, { parse_mode: 'Markdown' });
   
   if (userId) {

@@ -11,6 +11,9 @@ import {
   getUserIgnoredWords,
   addIgnoredWord,
   deleteIgnoredWord,
+  updateUserGPSLocation,
+  getUserGPSLocation,
+  updateUserProximityRadius,
 } from './db.js';
 
 let bot = null;
@@ -28,6 +31,7 @@ export function initBotApi() {
     return showSummaryScreen(ctx);
   });
   
+  bot.on('location', handleLocation);
   bot.on('text', handleText);
   
   bot.catch((err, ctx) => {
@@ -46,6 +50,7 @@ export function initBotApi() {
 function getMainMenuKeyboard() {
   return Markup.keyboard([
     ['🏙️ Мої міста', '⚠️ Типи загроз'],
+    ['📍 Моя локація', '📏 Радіус попередження'],
     ['🚫 Ігноровані слова', '📊 Зведення'],
     ['ℹ️ Допомога']
   ]).resize();
@@ -57,7 +62,8 @@ async function handleStart(ctx) {
   
   await ctx.reply(
     '👋 Привіт! Я допомагаю відстежувати загрози для твоїх міст.\n\n' +
-    '🔔 Ти отримаєш сповіщення про загрози в налаштованих локаціях.\n\n' +
+    '🔔 Ти отримаєш сповіщення про загрози в налаштованих локаціях.\n' +
+    '📍 Поділись своєю локацією для отримання попереджень про близькі загрози.\n\n' +
     '📍 Обери потрібний розділ:',
     getMainMenuKeyboard()
   );
@@ -156,6 +162,79 @@ async function showThreatsScreen(ctx) {
   await ctx.reply(message, Markup.keyboard(buttons).resize());
 }
 
+async function showMyLocationScreen(ctx) {
+  const telegramUserId = ctx.from.id;
+  const user = getOrCreateUser(telegramUserId);
+  const gpsLocation = getUserGPSLocation(user.id);
+  
+  if (!gpsLocation || !gpsLocation.latitude || !gpsLocation.longitude) {
+    await ctx.reply(
+      '📍 Моя локація\n\n' +
+      'У тебе ще не збережена GPS локація.\n\n' +
+      '💡 Поділись своєю локацією, щоб отримувати попередження про загрози в радіусі від твого місцезнаходження.',
+      Markup.keyboard([
+        [Markup.button.locationRequest('📍 Поділитися локацією')],
+        ['« Назад']
+      ]).resize()
+    );
+    return;
+  }
+  
+  const lastUpdate = gpsLocation.location_updated_at 
+    ? new Date(gpsLocation.location_updated_at).toLocaleString('uk-UA')
+    : 'Невідомо';
+  
+  await ctx.reply(
+    '📍 Моя локація\n\n' +
+    `📌 Координати: ${gpsLocation.latitude.toFixed(6)}, ${gpsLocation.longitude.toFixed(6)}\n` +
+    `🕐 Оновлено: ${lastUpdate}\n` +
+    `📏 Радіус попередження: ${gpsLocation.proximity_radius} км\n\n` +
+    '💡 Поділись локацією знову, щоб оновити.',
+    Markup.keyboard([
+      [Markup.button.locationRequest('📍 Оновити локацію')],
+      ['« Назад']
+    ]).resize()
+  );
+}
+
+async function showProximityRadiusScreen(ctx) {
+  const telegramUserId = ctx.from.id;
+  const user = getOrCreateUser(telegramUserId);
+  const gpsLocation = getUserGPSLocation(user.id);
+  
+  const currentRadius = gpsLocation?.proximity_radius || 20;
+  
+  await ctx.reply(
+    '📏 Радіус попередження\n\n' +
+    `Поточний радіус: ${currentRadius} км\n\n` +
+    '💡 Обери радіус, в межах якого ти хочеш отримувати попередження про загрози від твоєї GPS локації:',
+    Markup.keyboard([
+      ['10 км', '20 км', '30 км'],
+      ['40 км', '50 км'],
+      ['« Назад']
+    ]).resize()
+  );
+  
+  userStates.set(telegramUserId, {
+    command: 'setproximityradius'
+  });
+}
+
+async function handleLocation(ctx) {
+  const telegramUserId = ctx.from.id;
+  const user = getOrCreateUser(telegramUserId);
+  const location = ctx.message.location;
+  
+  updateUserGPSLocation(user.id, location.latitude, location.longitude);
+  
+  await ctx.reply(
+    '✅ Локація збережена!\n\n' +
+    `📍 Координати: ${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}\n\n` +
+    'Тепер ти отримуватимеш попередження про загрози в радіусі від твого місцезнаходження.',
+    getMainMenuKeyboard()
+  );
+}
+
 async function showHelpScreen(ctx) {
   await ctx.reply(
     'ℹ️ Довідка\n\n' +
@@ -167,6 +246,10 @@ async function showHelpScreen(ctx) {
     '• Додай свої міста в розділі "Мої міста"\n' +
     '• Можеш додати декілька локацій (дім, батьки, робота)\n' +
     '• Отримуватимеш сповіщення тільки для своїх міст\n\n' +
+    '📍 Моя локація:\n' +
+    '• Поділись своєю GPS локацією для точних попереджень\n' +
+    '• Отримуватимеш сповіщення про загрози в радіусі від твого місця\n' +
+    '• Встанови радіус попередження від 10 до 50 км\n\n' +
     '⚠️ Типи загроз:\n' +
     '• Обери які типи загроз тебе цікавлять\n' +
     '• Стратегічні загрози (ракети, авіація) надсилаються всім\n' +
@@ -415,6 +498,30 @@ async function handleText(ctx) {
     if (handled) return;
   }
   
+  if (state && state.command === 'setproximityradius') {
+    if (text === '« Назад') {
+      userStates.delete(telegramUserId);
+      await showMainMenu(ctx);
+      return;
+    }
+    
+    const radiusMatch = text.match(/(\d+)\s*км/);
+    if (radiusMatch) {
+      const radius = parseInt(radiusMatch[1]);
+      if ([10, 20, 30, 40, 50].includes(radius)) {
+        const user = getOrCreateUser(telegramUserId);
+        updateUserProximityRadius(user.id, radius);
+        await ctx.reply(
+          `✅ Радіус попередження встановлено: ${radius} км\n\n` +
+          'Тепер ти отримуватимеш попередження про загрози в цьому радіусі від твоєї GPS локації.',
+          getMainMenuKeyboard()
+        );
+        userStates.delete(telegramUserId);
+        return;
+      }
+    }
+  }
+  
   if (state && state.command === 'deletecity') {
     if (text === '« Назад') {
       userStates.delete(telegramUserId);
@@ -467,6 +574,14 @@ async function handleText(ctx) {
     case '⚠️ Типи загроз':
       userStates.delete(telegramUserId);
       await showThreatsScreen(ctx);
+      break;
+    case '📍 Моя локація':
+      userStates.delete(telegramUserId);
+      await showMyLocationScreen(ctx);
+      break;
+    case '📏 Радіус попередження':
+      userStates.delete(telegramUserId);
+      await showProximityRadiusScreen(ctx);
       break;
     case '🚫 Ігноровані слова':
       userStates.delete(telegramUserId);

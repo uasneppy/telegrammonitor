@@ -19,6 +19,10 @@ function createTables() {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       telegram_user_id INTEGER UNIQUE NOT NULL,
+      latitude REAL,
+      longitude REAL,
+      proximity_radius INTEGER DEFAULT 20,
+      location_updated_at TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
@@ -224,6 +228,30 @@ export function addIgnoredWord(userId, word) {
 
 export function deleteIgnoredWord(userId, wordId) {
   return db.prepare('DELETE FROM user_ignored_words WHERE id = ? AND user_id = ?').run(wordId, userId);
+}
+
+export function updateUserGPSLocation(userId, latitude, longitude) {
+  return db.prepare(`
+    UPDATE users 
+    SET latitude = ?, longitude = ?, location_updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(latitude, longitude, userId);
+}
+
+export function getUserGPSLocation(userId) {
+  return db.prepare(`
+    SELECT latitude, longitude, proximity_radius, location_updated_at
+    FROM users 
+    WHERE id = ?
+  `).get(userId);
+}
+
+export function updateUserProximityRadius(userId, radius) {
+  return db.prepare(`
+    UPDATE users 
+    SET proximity_radius = ?
+    WHERE id = ?
+  `).run(radius, userId);
 }
 
 export function getDatabase() {

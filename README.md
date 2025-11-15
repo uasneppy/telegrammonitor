@@ -8,7 +8,9 @@ A Node.js application that monitors Telegram channels for threat alerts, analyze
 - **Bot API Integration**: Handles user commands and sends alerts via Telegram Bot API
 - **AI Analysis**: Uses Google Gemini 2.5 Flash to analyze threats and provide structured summaries
 - **Smart Filtering**: Matches threats against user-configured cities, oblasts, and threat types
-- **SQLite Database**: Stores user preferences, locations, and message history
+- **GPS Proximity Warnings**: Share your location to receive alerts about threats within your chosen radius (10-50 km)
+- **Geocoding Service**: Automatically converts Ukrainian location names to coordinates using GeoJSON data
+- **SQLite Database**: Stores user preferences, locations, message history, and GPS coordinates with persistent data across restarts
 
 ## Prerequisites
 
@@ -79,6 +81,10 @@ Start a chat with your bot and use the beautiful inline keyboard interface:
 2. Use the interactive buttons to:
    - 🏙️ **Мої міста** - View, add, or delete your cities
    - ⚠️ **Типи загроз** - Toggle threat type filters with one tap
+   - 📍 **Моя локація** - Share your GPS location for proximity warnings
+   - 📏 **Радіус попередження** - Set warning radius (10, 20, 30, 40, 50 km)
+   - 🚫 **Ігноровані слова** - Add words to ignore in threat descriptions
+   - 📊 **Зведення** - Get AI-generated threat summaries
    - ℹ️ **Допомога** - View detailed help information
 
 The bot features a modern, aesthetic interface with:
@@ -87,6 +93,8 @@ The bot features a modern, aesthetic interface with:
 - Step-by-step city addition flow
 - One-tap city deletion
 - Instant threat filter toggling
+- GPS location sharing with Telegram's built-in location picker
+- Customizable proximity radius
 - Easy navigation with back buttons
 
 ### How Alerts Work
@@ -95,8 +103,38 @@ The bot features a modern, aesthetic interface with:
 2. Each message is analyzed by Gemini AI with recent context
 3. If a threat is detected:
    - **Strategic threats** (missiles, aviation, fleet) → sent to ALL users
-   - **Local threats** → sent only to users with matching locations
+   - **Proximity threats** → sent to users with GPS location if within their chosen radius
+   - **Local threats** → sent only to users with matching cities/oblasts
 4. Users receive alerts via the Bot API bot in Ukrainian
+5. **Proximity warnings** show distance and enhanced alert formatting when threats are nearby
+
+### GPS Proximity Warnings
+
+The bot can send special proximity warnings based on your exact GPS location:
+
+1. **Share Your Location**:
+   - Tap "📍 Моя локація" in the menu
+   - Use Telegram's location sharing button
+   - Your coordinates are securely stored in the database
+
+2. **Set Your Radius**:
+   - Tap "📏 Радіус попередження"
+   - Choose from 10, 20, 30, 40, or 50 km
+   - Default is 20 km
+
+3. **How It Works**:
+   - When a threat is detected, the system converts location names to GPS coordinates
+   - Your distance to the threat is calculated using the Haversine formula
+   - If within your radius, you receive a special proximity alert showing:
+     - 🚨 Enhanced warning header
+     - 📍 Exact distance from your location
+     - 📌 Threat location name
+   - Works even if you haven't saved any cities (GPS-only mode)
+
+4. **Data Persistence**:
+   - Your GPS location is saved to the SQLite database
+   - Survives bot restarts and server shutdowns
+   - Update anytime by sharing your location again
 
 ## Project Structure
 
@@ -108,12 +146,15 @@ telegram-threat-monitor/
 │   ├── db.js              # SQLite database management
 │   ├── geminiClient.js    # Gemini AI integration
 │   ├── analyzer.js        # Threat analysis parsing
-│   ├── dispatcher.js      # Alert distribution logic
+│   ├── dispatcher.js      # Alert distribution logic with proximity checks
 │   ├── botApi.js          # Telegram Bot API handler
-│   └── mtprotoClient.js   # MTProto user-bot client
+│   ├── mtprotoClient.js   # MTProto user-bot client
+│   ├── geocoding.js       # Ukraine GeoJSON data fetcher and location resolver
+│   └── distance.js        # Haversine distance calculations
 ├── data/                  # Generated at runtime
 │   ├── session.json       # MTProto session (auto-generated)
-│   └── settings.db        # SQLite database (auto-generated)
+│   ├── settings.db        # SQLite database (auto-generated)
+│   └── ukraine_geojson_cache.json  # Cached Ukraine location coordinates
 ├── package.json
 ├── .env                   # Your configuration (create from .env.example)
 └── README.md
@@ -122,11 +163,13 @@ telegram-threat-monitor/
 ## Database Schema
 
 The SQLite database includes:
-- `users` - Bot API users
+- `users` - Bot API users with GPS coordinates (latitude, longitude, proximity_radius)
 - `user_locations` - User's cities and oblasts
 - `user_threat_filters` - User's threat type preferences
 - `channels` - Monitored Telegram channels
 - `channel_messages` - Recent messages (last 20 per channel)
+- `sent_alerts` - History of sent alerts
+- `user_ignored_words` - Words to filter from alerts
 
 ## Troubleshooting
 

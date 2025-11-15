@@ -3,6 +3,7 @@ import { initDatabase } from './db.js';
 import { initGemini } from './geminiClient.js';
 import { initBotApi, sendAlertMessage } from './botApi.js';
 import { initMTProtoClient } from './mtprotoClient.js';
+import { initGeocoding } from './geocoding.js';
 
 console.log('🚀 Starting Telegram Threat Monitor...\n');
 
@@ -20,6 +21,7 @@ console.log('✓ Configuration validated\n');
 try {
   initDatabase();
   initGemini();
+  await initGeocoding();
   
   const bot = initBotApi();
   
@@ -28,6 +30,7 @@ try {
   console.log('\n✅ All systems initialized successfully!');
   console.log('📡 Monitoring channels for threats...');
   console.log('🤖 Bot API is ready to receive commands');
+  console.log('📍 GPS proximity warnings enabled');
   console.log('\nPress Ctrl+C to stop\n');
   
 } catch (error) {
