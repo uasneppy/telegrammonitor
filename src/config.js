@@ -20,7 +20,7 @@ export const config = {
     apiId: parseInt(process.env.TELEGRAM_API_ID || '0'),
     apiHash: process.env.TELEGRAM_API_HASH || '',
     sessionFile: process.env.TELEGRAM_SESSION_FILE || join(dataDir, 'session.json'),
-    phoneNumber: process.env.TELEGRAM_PHONE_NUMBER || '',
+    phoneNumber: process.env.TELEGRAM_PHONE || process.env.TELEGRAM_PHONE_NUMBER || '',
   },
   
   botApi: {
