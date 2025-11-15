@@ -380,7 +380,7 @@ async function handleSummaryPeriodSelection(ctx, text) {
     const summary = await generateSummary(alerts, text);
     await ctx.reply(
       `📊 Зведення за останні ${text}\n\n${summary}`,
-      getMainMenuKeyboard()
+      { ...getMainMenuKeyboard(), parse_mode: 'Markdown' }
     );
   } catch (error) {
     console.error('Error generating summary:', error);
@@ -470,13 +470,24 @@ async function handleText(ctx) {
   const text = ctx.message.text;
   const state = userStates.get(telegramUserId);
   
+  const mainMenuButtons = [
+    '🏙️ Мої міста', '⚠️ Типи загроз', '📍 Моя локація', '📏 Радіус попередження',
+    '🚫 Ігноровані слова', '📊 Зведення', 'ℹ️ Допомога', '« Назад', '« Головне меню'
+  ];
+  
+  if (state && mainMenuButtons.includes(text)) {
+    userStates.delete(telegramUserId);
+  }
+  
   if (state && state.command === 'addcity') {
     if (text === '❌ Скасувати') {
       await handleCancelAction(ctx);
       return;
     }
-    await handleAddCityFlow(ctx, state, text);
-    return;
+    if (!mainMenuButtons.includes(text)) {
+      await handleAddCityFlow(ctx, state, text);
+      return;
+    }
   }
   
   if (state && state.command === 'addignoredword') {
@@ -484,8 +495,10 @@ async function handleText(ctx) {
       await handleCancelAction(ctx);
       return;
     }
-    await handleAddIgnoredWordFlow(ctx, state, text);
-    return;
+    if (!mainMenuButtons.includes(text)) {
+      await handleAddIgnoredWordFlow(ctx, state, text);
+      return;
+    }
   }
   
   if (state && state.command === 'summary') {
